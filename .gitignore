@@ -1,0 +1,13 @@
+__pycache__/
+out/
+out_2k/
+out_test/
+CLAUDE/
+GEM/
+GRID/
+RENDER/
+REPEATS/
+bezier/
+RENDER.txt
+grid_guide_quarter.png
+headon_grid_check.png

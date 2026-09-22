@@ -1,0 +1,56 @@
+{
+  "view": "quarter",
+  "base": "base.png",
+  "size": [
+    1024,
+    796
+  ],
+  "quads": [
+    {
+      "piece": "comforter",
+      "corners": [
+        [
+          205,
+          319
+        ],
+        [
+          644,
+          217
+        ],
+        [
+          785,
+          305
+        ],
+        [
+          184,
+          539
+        ]
+      ],
+      "width_inches": 90.0,
+      "height_inches": 36.0
+    },
+    {
+      "piece": "comforter",
+      "corners": [
+        [
+          233,
+          506
+        ],
+        [
+          786,
+          287
+        ],
+        [
+          1017,
+          512
+        ],
+        [
+          409,
+          726
+        ]
+      ],
+      "width_inches": 90.0,
+      "height_inches": 40.0
+    }
+  ]
+}
