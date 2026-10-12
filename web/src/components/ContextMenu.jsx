@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-// Right-click menu for the Render Bin. Items:
+// Right-click menu for FOLIO (the render bin). Items:
 //   { label, onSelect, hint, danger, disabled, swatch, checked }
 //   { label, submenu: [items] }          nested list
 //   { label, panel: (close) => node }    nested custom panel (export settings)

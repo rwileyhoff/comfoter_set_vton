@@ -8,6 +8,7 @@ import { useBin } from './useBin.js';
 import Brief from './components/Brief.jsx';
 import RenderBin from './components/RenderBin.jsx';
 import { Grip, FloatOut, DockIn, Pin } from './components/Icons.jsx';
+import { useFrameActions } from './components/FrameActions.jsx';
 
 function readImageSize(url) {
   return new Promise((resolve) => {
@@ -50,6 +51,17 @@ export default function App() {
 
   const ws = useWorkspace();
   const bin = useBin();
+  const openInBin = (f) => { bin.setSel(f.id); setBinOpen(true); };
+  const wsActions = useFrameActions({ bin, where: 'workspace', onOpenInBin: openInBin, onRerender: (fs, sz) => rerender(fs, sz) });
+
+  // the frame shown for a view: the last one rendered this session, else the
+  // newest saved one for that view (so a reload still fills the canvas)
+  const latestFor = (v) => {
+    if (latest[v] && bin.frames[latest[v].id]) return bin.frames[latest[v].id];
+    let best = null;
+    Object.values(bin.frames).forEach((f) => { if (f.view === v && (!best || f.n > best.n)) best = f; });
+    return best;
+  };
 
   // load rooms once
   useEffect(() => {
@@ -131,6 +143,57 @@ export default function App() {
     }
   }, [engineDef, fabricA, fabricB, shamsFabric, size, effectiveOptions, engine, bin, selectedView]);
 
+  // proxy -> final: re-render frames with their own seed, options and fabric
+  // width, at a new size, and swap the images in place. Needs the same fabric
+  // image(s) loaded, checked by pixel size against what the render recorded.
+  const rerender = useCallback(async (frames, toSize) => {
+    if (busy) throw new Error('A render is already running');
+    const fits = (fab, rec) => fab && rec && rec.px && fab.w === rec.px[0] && fab.h === rec.px[1];
+    const groups = new Map();
+    frames.forEach((f) => {
+      const st = f.settings;
+      if (!st || !st.fabric_a) throw new Error(`R${pad4(f.n)} has no saved settings to re-render from`);
+      const sh = st.pieces && st.pieces.shams;
+      const key = JSON.stringify([st.seed, st.options, st.fabric_a.file_inches, st.fabric_a.px, sh ? [sh.file_inches, sh.px] : null]);
+      if (!groups.has(key)) groups.set(key, { st, frames: [] });
+      groups.get(key).frames.push(f);
+    });
+    for (const { st } of groups.values()) {
+      const A = st.fabric_a;
+      if (!fits(fabricA, A)) {
+        throw new Error(`Load the fabric these were rendered with as Fabric A (${A.px[0]} × ${A.px[1]} px${frames[0].fabric ? `, "${frames[0].fabric}"` : ''}). Loaded now: ${fabricA ? `${fabricA.w} × ${fabricA.h}` : 'nothing'}.`);
+      }
+      const sh = st.pieces && st.pieces.shams;
+      if (sh && !fits(fabricA, sh) && !fits(fabricB, sh)) {
+        throw new Error(`These used a separate shams fabric (${sh.px[0]} × ${sh.px[1]} px). Load it as Fabric B first.`);
+      }
+    }
+    setBusy(true); setError('');
+    let done = 0;
+    try {
+      for (const { st, frames: fs } of groups.values()) {
+        const sh = st.pieces && st.pieces.shams;
+        const shamsFab = sh ? (fits(fabricB, sh) ? fabricB : fabricA) : null;
+        const views = [...new Set(fs.map((f) => f.view))];
+        const res = await postRender({
+          fabricA: { file: fabricA.file, inches: st.fabric_a.file_inches },
+          shams: shamsFab ? { file: shamsFab.file, inches: sh.file_inches } : null,
+          views, size: toSize, options: st.options, seed: st.seed,
+        });
+        fs.forEach((f) => {
+          const v = res.views[f.view];
+          if (!v) return;
+          // a duplicate of the same view shares the one new image
+          bin.replaceRender(f.id, { url: v.url, size: toSize, settings: res.settings, seconds: v.seconds, engine: f.engine });
+          done += 1;
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+    return done;
+  }, [busy, fabricA, fabricB, bin]);
+
   const renderAll = () => doRender(VIEW_ORDER.filter((v) => viewsChecked.includes(v)));
   const renderSelected = () => doRender([selectedView]);
 
@@ -161,7 +224,7 @@ export default function App() {
   const frameCount = Object.keys(bin.frames).length;
   const roomViews = rooms ? rooms.views : [];
   const viewInfo = (v) => roomViews.find((x) => x.view === v) || {};
-  const current = latest[selectedView] && bin.frames[latest[selectedView].id] ? latest[selectedView] : null;
+  const current = latestFor(selectedView);
   const cur = viewInfo(selectedView);
 
   // ---------- palettes ----------
@@ -178,13 +241,14 @@ export default function App() {
       );
     }
     if (id === 'results') {
-      const rows = VIEW_ORDER.filter((v) => latest[v] && bin.frames[latest[v].id]).map((v) => latest[v]);
+      const rows = VIEW_ORDER.map(latestFor).filter(Boolean);
       return (
         <div className="list">
           {rows.length === 0 && <div className="hint">No renders yet. Add Fabric A, then Render.</div>}
           {rows.map((f) => (
             <div key={f.id} className="result">
-              <button type="button" onClick={() => setSelectedView(f.view)} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }} aria-label={`Show ${VIEW_NAMES[f.view]}`}>
+              <button type="button" onClick={() => setSelectedView(f.view)} onContextMenu={(e) => wsActions.openFrameMenu(e, f.id)}
+                style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }} aria-label={`Show ${VIEW_NAMES[f.view]}. Right-click for options`}>
                 <img className="thumb" src={f.url} alt="" />
               </button>
               <div className="meta">
@@ -205,14 +269,14 @@ export default function App() {
         {recent.length > 0 ? (
           <div className="mini-grid">
             {recent.map((f) => (
-              <button key={f.id} type="button" className="mini" aria-label={`Open R${pad4(f.n)} in the Render Bin`}
-                onClick={() => { bin.setSel(f.id); setBinOpen(true); }}>
+              <button key={f.id} type="button" className="mini" aria-label={`Open R${pad4(f.n)} in FOLIO`}
+                onClick={() => openInBin(f)} onContextMenu={(e) => wsActions.openFrameMenu(e, f.id)}>
                 <img src={f.url} alt="" /><span className="code">R{pad4(f.n)}</span>
               </button>
             ))}
           </div>
         ) : <div className="swatch-drop" style={{ height: 80, cursor: 'default' }}>Renders land here automatically.</div>}
-        <button type="button" className="btn-gold" onClick={() => setBinOpen(true)}>Open Render Bin <span className="kbd" style={{ color: 'var(--gold)', borderColor: '#5a4a38' }}>~</span></button>
+        <button type="button" className="btn-gold" onClick={() => setBinOpen(true)}>Open FOLIO <span className="kbd" style={{ color: 'var(--gold)', borderColor: '#5a4a38' }}>~</span></button>
       </div>
     );
   };
@@ -268,9 +332,9 @@ export default function App() {
             )}
           </div>
           <div className="actions">
-            <button type="button" className={`btn btn-action btn-bin ${binOpen ? 'on' : ''}`} aria-pressed={binOpen} title="Render Bin (~)"
+            <button type="button" className={`btn btn-action btn-bin ${binOpen ? 'on' : ''}`} aria-pressed={binOpen} title="FOLIO (~)"
               onClick={() => { bin.stopPlay(); setBinOpen((b) => !b); }}>
-              Render Bin <span className="count">{frameCount}</span><span className="kbd">~</span>
+              FOLIO <span className="count">{frameCount}</span><span className="kbd">~</span>
             </button>
             <button type="button" className="btn btn-action" title="Blueprint JSON: later">Blueprint JSON</button>
             <button type="button" className="btn btn-action btn-primary" onClick={renderAll} disabled={!canRender}
@@ -281,7 +345,7 @@ export default function App() {
         </div>
 
         {binOpen ? (
-          <RenderBin bin={bin} onClose={() => { bin.stopPlay(); setBinOpen(false); }} onSendToRender={sendToRender} />
+          <RenderBin bin={bin} onClose={() => { bin.stopPlay(); setBinOpen(false); }} onSendToRender={sendToRender} onRerender={rerender} busy={busy} />
         ) : (
           <>
             <div className="toolbar">
@@ -324,10 +388,11 @@ export default function App() {
                 <div className="ruler"><span>VIEWS</span><span>{(rooms ? rooms.name : 'BASE ROOM 1').toUpperCase()} · {size} PX</span></div>
                 <div className="strip" role="tablist" aria-label="Views">
                   {VIEW_ORDER.map((v, i) => {
-                    const info = viewInfo(v); const f = latest[v] && bin.frames[latest[v].id] ? latest[v] : null;
+                    const info = viewInfo(v); const f = latestFor(v);
                     return (
                       <button key={v} type="button" role="tab" aria-selected={selectedView === v} className={`shot ${selectedView === v ? 'on' : ''}`}
                         onClick={() => setSelectedView(v)}
+                        onContextMenu={f ? (e) => wsActions.openFrameMenu(e, f.id) : undefined}
                         style={{ background: f ? undefined : VIEW_FILLS[v], backgroundImage: f ? `url(${f.url})` : undefined }}>
                         {f && <div className="shade" />}
                         <div className="txt">
@@ -343,7 +408,10 @@ export default function App() {
 
                 <div className="canvas-wrap">
                   <div className="canvas">
-                    {current ? <img src={current.url} alt={`${VIEW_NAMES[selectedView]} render R${pad4(current.n)}`} /> : (
+                    {current ? (
+                      <img src={current.url} alt={`${VIEW_NAMES[selectedView]} render R${pad4(current.n)}`}
+                        onContextMenu={(e) => wsActions.openFrameMenu(e, current.id)} />
+                    ) : (
                       <div className="empty">
                         <div>[{VIEW_NAMES[selectedView]} render · {size} px]</div>
                         <div className="sub">{fabricA ? 'press Render' : 'add Fabric A: Fabrics tab, upload or paste'}</div>
@@ -394,6 +462,7 @@ export default function App() {
           </>
         )}
       </div>
+      {!binOpen && wsActions.overlays}
     </div>
   );
 }

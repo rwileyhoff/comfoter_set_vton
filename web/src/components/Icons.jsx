@@ -32,3 +32,8 @@ export const T = {
   fwd: () => <svg {...P} width="16" height="14" viewBox="0 0 16 14" fill="currentColor"><path d="M1 2L7 7L1 12z" /><path d="M8 2L14 7L8 12z" /></svg>,
   last: () => <svg {...P} width="16" height="14" viewBox="0 0 16 14" fill="currentColor"><path d="M1 2L6.5 7L1 12z" /><path d="M7 2L12.5 7L7 12z" /><rect x="13" y="2" width="2" height="10" /></svg>,
 };
+export const Lock = ({ open }) => (
+  <svg {...P} width="11" height="12" viewBox="0 0 24 26" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="11" width="16" height="12" rx="2" />{open ? <path d="M8 11V7a4 4 0 0 1 7.5-2" /> : <path d="M8 11V7a4 4 0 0 1 8 0v4" />}
+  </svg>
+);

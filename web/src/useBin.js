@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { REEL_COLORS } from './constants.js';
+import { putBlob, deleteBlobs, saveState, loadAll, clearAll, usage, askPersist } from './binStore.js';
 
-// Render Bin state. The reel model follows LATTICE COMPOSE's composeReducer:
+// FOLIO (render bin) state. The reel model follows LATTICE COMPOSE's composeReducer:
 // reels hold ordered frame ids; frames hold the render and its settings.
 
 const VIEWER_KEY = 'fabric.viewer.v2';
+const DEFAULT_REELS = () => [
+  { id: 'reel_1', title: 'Renders', color: REEL_COLORS[0], collapsed: false, items: [] },
+  { id: 'reel_2', title: 'Selects', color: REEL_COLORS[1], collapsed: false, items: [] },
+];
 
 export function useBin() {
   const [frames, setFrames] = useState({});
-  const [reels, setReels] = useState([
-    { id: 'reel_1', title: 'Renders', color: REEL_COLORS[0], collapsed: false, items: [] },
-    { id: 'reel_2', title: 'Selects', color: REEL_COLORS[1], collapsed: false, items: [] },
-  ]);
+  const [reels, setReels] = useState(DEFAULT_REELS);
   const counters = useRef({ frame: 0, reel: 2, dup: 0 });
   const [sel, setSel] = useState(null);
   const [cursor, setCursor] = useState({});
@@ -26,12 +28,101 @@ export function useBin() {
   const stateRef = useRef({});
   stateRef.current = { frames, reels, sel, cursor };
 
+  // ---------- persistence (IndexedDB, this browser only) ----------
+  const [loaded, setLoaded] = useState(false);
+  const [store, setStore] = useState({ ok: true, used: 0, error: '' });
+  const storedKeys = useRef(new Set());
+  const pending = useRef(new Set()); // blob keys still being written
+
+  const refreshUsage = useCallback(() => {
+    usage().then((u) => { if (u) setStore((s) => ({ ...s, used: u.used, quota: u.quota })); });
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    loadAll().then(({ state, blobs }) => {
+      if (!alive) return;
+      storedKeys.current = new Set(blobs.keys());
+      if (state && state.frames) {
+        const restored = {};
+        Object.values(state.frames).forEach((f) => {
+          const b = blobs.get(f.blob);
+          if (b) restored[f.id] = { ...f, url: URL.createObjectURL(b) };
+        });
+        const rs = (state.reels && state.reels.length ? state.reels : DEFAULT_REELS())
+          .map((r) => ({ ...r, items: r.items.filter((x) => restored[x]) }));
+        if (state.counters) counters.current = { ...counters.current, ...state.counters };
+        // keep anything rendered in the moment before the load finished
+        setFrames((cur) => ({ ...restored, ...cur }));
+        setReels((cur) => {
+          const fresh = cur.flatMap((r) => r.items);
+          if (!fresh.length) return rs;
+          const list = rs.map((r) => ({ ...r, items: r.items.slice() }));
+          const t = list.find((r) => r.title === 'Renders') || list[0];
+          if (t) t.items = t.items.concat(fresh.filter((x) => !t.items.includes(x)));
+          return list;
+        });
+        if (state.compareA && restored[state.compareA]) setCompareA(state.compareA);
+      }
+      setLoaded(true);
+      askPersist();
+      refreshUsage();
+    }).catch((e) => {
+      if (!alive) return;
+      setStore((s) => ({ ...s, ok: false, error: e.message || String(e) }));
+      setLoaded(true);
+    });
+    return () => { alive = false; };
+  }, [refreshUsage]);
+
+  // save the bin's state after every change (debounced), and drop images nothing uses
+  useEffect(() => {
+    if (!loaded || !store.ok) return undefined;
+    const t = setTimeout(() => {
+      const plain = {};
+      Object.values(frames).forEach((f) => { const { url, ...rest } = f; plain[f.id] = rest; });
+      saveState({ v: 1, frames: plain, reels, counters: counters.current, compareA })
+        .then(() => {
+          const used = new Set(Object.values(frames).map((f) => f.blob));
+          const orphans = [...storedKeys.current].filter((k) => !used.has(k) && !pending.current.has(k));
+          orphans.forEach((k) => storedKeys.current.delete(k));
+          return deleteBlobs(orphans);
+        })
+        .then(refreshUsage)
+        .catch((e) => setStore((s) => ({ ...s, error: `Could not save the bin: ${e.message || e}` })));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [frames, reels, compareA, loaded, store.ok, refreshUsage]);
+
+  const storeImages = (made) => {
+    made.forEach((m) => {
+      pending.current.add(m.blob);
+      fetch(m.url).then((r) => r.blob())
+        .then((b) => putBlob(m.blob, b))
+        .then(() => { storedKeys.current.add(m.blob); setStore((s) => ({ ...s, error: '' })); refreshUsage(); })
+        .catch((e) => setStore((s) => ({ ...s, error: `Could not save R${m.n} to the bin store: ${e.message || e}` })))
+        .finally(() => pending.current.delete(m.blob));
+    });
+  };
+
+  const clearBin = async () => {
+    stopPlay();
+    Object.values(stateRef.current.frames).forEach((f) => { try { URL.revokeObjectURL(f.url); } catch (e) { /* ignore */ } });
+    setFrames({}); setReels(DEFAULT_REELS()); setSel(null); setCompareA(null); setCursor({});
+    counters.current = { frame: 0, reel: 2, dup: 0 };
+    storedKeys.current = new Set();
+    try { await clearAll(); } catch (e) { /* the next save rewrites it */ }
+    refreshUsage();
+  };
+
   // add one batch of renders to the "Renders" reel
   const addBatch = useCallback((items) => {
     const made = items.map((it) => {
       counters.current.frame += 1;
-      return { ...it, id: `f${counters.current.frame}`, n: counters.current.frame };
+      const id = `f${counters.current.frame}`;
+      return { ...it, id, blob: id, n: counters.current.frame };
     });
+    storeImages(made);
     setFrames((f) => { const o = { ...f }; made.forEach((m) => { o[m.id] = m; }); return o; });
     setReels((rs) => {
       let list = rs.map((r) => ({ ...r, items: r.items.slice() }));
@@ -55,6 +146,42 @@ export function useBin() {
   const updReel = (id, fn) => setReels((rs) => rs.map((r) => (r.id === id ? fn(r) : r)));
   const renameReel = (id, title) => { const t = title.trim(); if (t) updReel(id, (r) => ({ ...r, title: t })); };
   const toggleReel = (id) => updReel(id, (r) => ({ ...r, collapsed: !r.collapsed }));
+  // Flame's L: locked reels step together, by position
+  const toggleLock = (id) => updReel(id, (r) => ({ ...r, locked: !r.locked }));
+  const syncLocked = (rid, i, cur) => {
+    const r = stateRef.current.reels.find((x) => x.id === rid);
+    if (!r || !r.locked) return cur;
+    const out = { ...cur };
+    stateRef.current.reels.forEach((x) => {
+      if (x.id === rid || !x.locked) return;
+      const n = liveIds(x).length;
+      if (n) out[x.id] = Math.min(i, n - 1);
+    });
+    return out;
+  };
+  // the frame each locked reel is parked on, in reel order (for the multi-up viewer)
+  const lockedSet = () => stateRef.current.reels.filter((r) => r.locked).map((r) => {
+    const ids = liveIds(r);
+    if (!ids.length) return null;
+    const i = curIndex(r);
+    return { reel: r, frame: stateRef.current.frames[ids[i]], index: i };
+  }).filter(Boolean);
+
+  // swap a frame's image for a new render (proxy -> final), keeping its place, name, tag and note
+  const replaceRender = (fid, data) => {
+    const f = stateRef.current.frames[fid];
+    if (!f) return;
+    counters.current.dup += 1;
+    const blob = `${fid}r${counters.current.dup}`;
+    const next = { ...f, ...data, blob, proxy: { size: f.size, seed: f.settings ? f.settings.seed : null } };
+    storeImages([next]);
+    setFrames((cur) => {
+      if (!cur[fid]) return cur;
+      const others = Object.values(cur).some((m) => m.id !== fid && m.url === cur[fid].url);
+      if (!others) { try { URL.revokeObjectURL(cur[fid].url); } catch (e) { /* ignore */ } }
+      return { ...cur, [fid]: next };
+    });
+  };
 
   // duplicates share the source blob URL, so only revoke a URL nothing else uses
   const dropFrames = (ids) => {
@@ -140,7 +267,7 @@ export function useBin() {
     if (!ids.length) return;
     let i = typeof to === 'function' ? to(curIndex(r), ids.length) : to;
     i = Math.max(0, Math.min(ids.length - 1, i));
-    setCursor((c) => ({ ...c, [rid]: i }));
+    setCursor((c) => syncLocked(rid, i, { ...c, [rid]: i }));
     setSel(ids[i]);
     scrollTo(ids[i]);
   };
@@ -157,7 +284,7 @@ export function useBin() {
   const selectFrame = (rid, fid) => {
     if (stateRef.current.sel === fid) { setSel(null); return; }
     const r = stateRef.current.reels.find((x) => x.id === rid);
-    if (r) setCursor((c) => ({ ...c, [rid]: liveIds(r).indexOf(fid) }));
+    if (r) { const i = liveIds(r).indexOf(fid); setCursor((c) => syncLocked(rid, i, { ...c, [rid]: i })); }
     setSel(fid);
   };
   const stepSelected = (delta) => {
@@ -173,6 +300,7 @@ export function useBin() {
 
   return {
     frames, reels, sel, setSel, cursor, playing, viewerOpen, drag, dropReel, compareA, setCompareA,
+    loaded, store, clearBin, toggleLock, lockedSet, replaceRender,
     updateFrame, duplicateFrame,
     setDrag, setDropReel, endDrag,
     addBatch, newReel, renameReel, toggleReel, deleteReel, removeFrame, moveFrame, moveReel,

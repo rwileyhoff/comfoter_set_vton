@@ -1,4 +1,4 @@
-// Client-side export: convert a Render Bin frame to PNG / JPEG / WEBP at a
+// Client-side export: convert a FOLIO frame to PNG / JPEG / WEBP at a
 // chosen size, copy it to the clipboard, or zip a whole reel.
 import { pad4, VIEW_NAMES } from './constants.js';
 import { makeZip } from './zip.js';

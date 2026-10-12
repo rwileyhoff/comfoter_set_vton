@@ -178,7 +178,7 @@ input[type=range] { accent-color: var(--blue); }
 .tag-chip { margin-left: 10px; font-family: var(--mono); font-size: 10.5px; border: 1px solid; border-radius: 3px; padding: 1px 6px; vertical-align: 2px; }
 .note-box { background: rgba(255,255,255,0.035); border-left: 2px solid var(--gold); border-radius: 4px; padding: 7px 10px; font-size: 12.5px; color: rgba(240,237,232,0.85); white-space: pre-wrap; }
 .bin { position: relative; }
-.bin-toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 60; max-width: min(640px, calc(100vw - 32px)); background: #15151b; border: 1px solid rgba(212,165,116,0.5); color: #F0EDE8; border-radius: 8px; padding: 9px 16px; font-size: 12.5px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); font-family: var(--dm); }
+.bin-toast { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 60; max-width: min(640px, calc(100vw - 32px)); background: #15151b; border: 1px solid rgba(212,165,116,0.5); color: #F0EDE8; border-radius: 8px; padding: 9px 16px; font-size: 12.5px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); font-family: var(--dm); }
 .bin-toast.err { border-color: #6a2a30; background: #2a1416; color: #f2c4c8; }
 
 /* context menu */
@@ -232,3 +232,32 @@ input[type=range] { accent-color: var(--blue); }
 .side figcaption { font-family: var(--mono); font-size: 11px; color: rgba(240,237,232,0.7); padding-top: 5px; }
 .compare-diff { font-size: 12px; line-height: 1.6; color: rgba(240,237,232,0.8); word-break: break-word; }
 .note-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--gold); margin-left: 5px; vertical-align: 1px; box-shadow: 0 0 2px #000; }
+.bin-store { font-size: 11px; color: rgba(240,237,232,0.4); margin-top: 3px; font-family: var(--mono); }
+.bin-store.err { color: #f2a4ae; }
+.lbtn:disabled { opacity: 0.4; cursor: default; }
+.lbtn.danger { color: #f2c4c8; border-color: #6a2a30; background: #2a1416; }
+.confirm-clear { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #f2c4c8; }
+
+/* lock + sync, proxies, hotkeys, go-to */
+.lock-btn { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px solid rgba(255,255,255,0.1); border-radius: 5px; padding: 2px 8px; font-size: 11px; color: rgba(240,237,232,0.55); cursor: pointer; font-family: var(--dm); }
+.lock-btn.on { color: #7EB8C9; border-color: rgba(126,184,201,0.55); background: rgba(126,184,201,0.1); }
+.reel.locked { border-color: rgba(126,184,201,0.28); }
+.pos-lock { color: #7EB8C9; margin-right: 6px; vertical-align: -1px; }
+.proxy-badge { position: absolute; bottom: 6px; right: 6px; font-family: var(--mono); font-size: 9.5px; color: #f0e3d2; background: rgba(0,0,0,0.7); border: 1px solid rgba(212,165,116,0.55); border-radius: 3px; padding: 0 4px; }
+.proxy-badge.inline { position: static; margin-left: 8px; }
+.hotkeys { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 5px; font-size: 11px; color: rgba(240,237,232,0.45); }
+.hotkeys b { font-family: var(--mono); font-weight: 500; font-size: 10.5px; color: rgba(240,237,232,0.75); border: 1px solid rgba(255,255,255,0.14); border-radius: 3px; padding: 0 4px; margin-right: 3px; }
+.goto { display: flex; align-items: center; gap: 10px; margin: 10px 18px 0; padding: 8px 12px; background: #101015; border: 1px solid rgba(212,165,116,0.5); border-radius: 8px; color: #F0EDE8; font-size: 13px; }
+.goto .field { width: 80px; font-size: 14px; }
+.bin-busy { margin: 10px 18px 0; padding: 7px 12px; border-radius: 6px; background: #0e1a24; border: 1px solid #23415e; color: #b8d0ee; font-size: 12px; }
+.viewer.multi { flex-direction: column; align-items: stretch; gap: 10px; }
+.multi-head { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 13px; color: #F0EDE8; }
+.multi-head > span:first-child { color: #7EB8C9; display: inline-flex; gap: 6px; align-items: center; }
+.multi-head .lbtn { margin-left: auto; }
+.multi-grid { display: grid; gap: 10px; }
+.multi-cell { margin: 0; border: 2px solid rgba(255,255,255,0.1); border-radius: 8px; overflow: hidden; background: #111; }
+.multi-cell.on { box-shadow: 0 0 0 3px rgba(212,165,116,0.18); }
+.multi-cell button { display: block; width: 100%; padding: 0; border: none; background: none; cursor: pointer; }
+.multi-cell img { display: block; width: 100%; aspect-ratio: 32 / 25; max-height: 34vh; object-fit: contain; background: #0a0a0a; }
+.multi-cell figcaption { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 6px 9px; font-family: var(--mono); font-size: 11px; color: rgba(240,237,232,0.8); }
+.multi-cell .swatch { width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }

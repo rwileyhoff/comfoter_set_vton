@@ -38,11 +38,11 @@ export const PIECE_COUNTS = {
   '9 PC': ['Comforter', 'Sham', 'Sham', 'Dec pillow', 'Dec pillow', 'Euro', 'Euro', 'Bed skirt', 'Throw'],
 };
 
-export const PALETTE_TITLES = { brief: 'BRIEF', results: 'RESULTS', bin: 'RENDER BIN' };
+export const PALETTE_TITLES = { brief: 'BRIEF', results: 'RESULTS', bin: 'FOLIO' };
 
 export const pad4 = (n) => ('000' + n).slice(-4);
 
-// Render Bin colour tags (Flame clip colours)
+// FOLIO colour tags (Flame clip colours)
 export const TAGS = [
   { id: 'approved', label: 'Approved', color: '#8BC9A0' },
   { id: 'revise', label: 'Revise', color: '#E0B04A' },
