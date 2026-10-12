@@ -531,7 +531,7 @@ def occlusion_map(base_gray, depth_map, amount=0.45, px=1.0):
 # 4. weave
 # ----------------------------------------------------------------------------
 
-def weave_map(shape, ppi, threads_per_inch=90.0, amount=0.18, px=1.0):
+def weave_map(shape, ppi, threads_per_inch=90.0, amount=0.18, px=1.0, rng=None):
     """
     Procedural warp and weft, BAND-LIMITED.
 
@@ -567,8 +567,9 @@ def weave_map(shape, ppi, threads_per_inch=90.0, amount=0.18, px=1.0):
         f = (warp * 0.5 + weft * 0.5) + (warp * weft) * 0.25
         fabric = (f / (np.abs(f).max() + 1e-6)).astype(np.float32) * resolvable
 
+    rng = rng if rng is not None else np.random
     slub = cv2.GaussianBlur(
-        np.random.normal(0, 1, (h, w)).astype(np.float32), (0, 0), 1.2 * px)
+        rng.normal(0, 1, (h, w)).astype(np.float32), (0, 0), 1.2 * px)
     slub = slub / (np.abs(slub).max() + 1e-6)
 
     texture = fabric * 0.8 + slub * 0.2
@@ -581,9 +582,10 @@ def weave_map(shape, ppi, threads_per_inch=90.0, amount=0.18, px=1.0):
 
 def blend(base_rgb, mask, texture_rgb, ao=None, weave=None,
           brightness=1.0, feather=2.5, fuzz=0.35, grain=0.02,
-          specular=0.10, px=1.0):
+          specular=0.10, px=1.0, rng=None):
     if mask is None:
         return base_rgb
+    rng = rng if rng is not None else np.random
 
     h, w = base_rgb.shape[:2]
     if texture_rgb.shape[:2] != (h, w):
@@ -620,7 +622,7 @@ def blend(base_rgb, mask, texture_rgb, ao=None, weave=None,
         tex = np.clip(tex * weave[:, :, None], 0, 1.0)
 
     composite = tex * shading[:, :, None] + highlights[:, :, None]
-    composite += np.random.normal(0, grain, composite.shape).astype(np.float32)
+    composite += rng.normal(0, grain, composite.shape).astype(np.float32)
     composite = np.clip(composite, 0, 1.0)
 
     # feathered edge with a little fibre noise along the boundary
@@ -631,7 +633,7 @@ def blend(base_rgb, mask, texture_rgb, ao=None, weave=None,
         edge = cv2.GaussianBlur(np.abs(cv2.Laplacian(alpha, cv2.CV_32F)), (0, 0), 1.0 * px)
         edge = edge / (edge.max() + 1e-6)
         noise = cv2.GaussianBlur(
-            np.random.normal(0, 1, alpha.shape).astype(np.float32), (0, 0), 0.8 * px)
+            rng.normal(0, 1, alpha.shape).astype(np.float32), (0, 0), 0.8 * px)
         alpha = np.clip(alpha + edge * noise * fuzz, 0, 1)
     alpha = alpha[:, :, None]
 
@@ -644,7 +646,15 @@ def blend(base_rgb, mask, texture_rgb, ao=None, weave=None,
 # view rendering
 # ----------------------------------------------------------------------------
 
-def render_view(view_dir, pattern_rgb, file_inches, opts, patterns_by_piece=None):
+def render_view(view_dir, pattern_rgb, file_inches, opts, patterns_by_piece=None,
+                rng=None):
+    """
+    patterns_by_piece: optional {piece: pattern_rgb} or {piece: (pattern_rgb,
+    file_inches)}. The tuple form gives a piece its own fabric at its own true
+    width (Fabric B on the shams, say); a bare array keeps the main file_inches.
+    rng: optional numpy RandomState for the noise terms. None uses the global
+    np.random, exactly as before; a seeded RandomState makes a render repeatable.
+    """
     base_bgr = load_asset(view_dir, "base")
     if base_bgr is None:
         raise FileNotFoundError(f"no base image in {view_dir}")
@@ -693,6 +703,10 @@ def render_view(view_dir, pattern_rgb, file_inches, opts, patterns_by_piece=None
             continue
 
         pat = (patterns_by_piece or {}).get(piece, pattern_rgb)
+        piece_ppi = pattern_ppi
+        if isinstance(pat, tuple):
+            pat, piece_inches = pat
+            piece_ppi = pat.shape[1] / max(1e-6, float(piece_inches))
         angle = config.get("rotation" if piece == "comforter" else "sham_rotation", 0)
 
         grid = load_json(os.path.join(view_dir, f"grid_{piece}.json"))
@@ -712,22 +726,22 @@ def render_view(view_dir, pattern_rgb, file_inches, opts, patterns_by_piece=None
             # off from quarter. Swapping the two maps turns the print on the
             # cloth without touching the clicked grid.
             if angle in (90, 270, -90, -270):
-                layer = sample_pattern_uv(pat, v_map, u_map, pattern_ppi)
+                layer = sample_pattern_uv(pat, v_map, u_map, piece_ppi)
             else:
-                layer = sample_pattern_uv(pat, u_map, v_map, pattern_ppi)
+                layer = sample_pattern_uv(pat, u_map, v_map, piece_ppi)
 
             gaps = cv2.bitwise_and(mask, cv2.bitwise_not(coverage))
             if np.any(gaps > 128):
                 key = "comforter_ppi" if piece == "comforter" else "sham_ppi"
                 fallback_ppi = config.get(key) or grid_screen_ppi(grid, gpx)
-                filler = tile_uniform(pat, base_rgb.shape, pattern_ppi,
+                filler = tile_uniform(pat, base_rgb.shape, piece_ppi,
                                       fallback_ppi, angle)
                 layer[gaps > 128] = filler[gaps > 128]
 
             target_ppi = None
         elif piece in quads_by_piece:
             layer, coverage = tile_perspective(
-                pat, quads_by_piece[piece], base_rgb.shape, pattern_ppi, angle,
+                pat, quads_by_piece[piece], base_rgb.shape, piece_ppi, angle,
                 seam_blend=getattr(opts, "seam_blend", 1.5) * px)
 
             # A quad only approximates the cloth, so parts of the mask fall
@@ -744,7 +758,7 @@ def render_view(view_dir, pattern_rgb, file_inches, opts, patterns_by_piece=None
                     px_w = max(np.linalg.norm(dst[1] - dst[0]),
                                np.linalg.norm(dst[2] - dst[3]))
                     fallback_ppi = px_w / max(1e-6, float(q0.get("width_inches", 90)))
-                filler = tile_uniform(pat, base_rgb.shape, pattern_ppi,
+                filler = tile_uniform(pat, base_rgb.shape, piece_ppi,
                                       fallback_ppi, angle)
                 layer[gaps > 128] = filler[gaps > 128]
 
@@ -754,7 +768,7 @@ def render_view(view_dir, pattern_rgb, file_inches, opts, patterns_by_piece=None
             if key not in config:
                 raise KeyError(f"{view_dir}: config.json has no {key}")
             target_ppi = config[key]
-            layer = tile_uniform(pat, base_rgb.shape, pattern_ppi, target_ppi, angle)
+            layer = tile_uniform(pat, base_rgb.shape, piece_ppi, target_ppi, angle)
 
         layer = displacement_warp(layer, depth, base_gray,
                                   config.get("displacement_strength", 30),
@@ -762,12 +776,12 @@ def render_view(view_dir, pattern_rgb, file_inches, opts, patterns_by_piece=None
 
         ppi_for_weave = target_ppi if target_ppi else config.get("comforter_ppi", 20)
         weave = weave_map(base_rgb.shape, ppi_for_weave,
-                          opts.threads, opts.weave_amount, px=px)
+                          opts.threads, opts.weave_amount, px=px, rng=rng)
 
         result = blend(result, mask, layer, ao=ao, weave=weave,
                        brightness=config.get("brightness", 1.0),
                        feather=opts.feather, fuzz=opts.fuzz, grain=opts.grain,
-                       specular=opts.specular, px=px)
+                       specular=opts.specular, px=px, rng=rng)
 
     return result
 
